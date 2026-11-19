@@ -62,11 +62,11 @@ Parameters:
     AllowedValues: [t4g.small, t4g.medium, t4g.large]
   AmiParameter:
     Type: String
-    Default: ""
+    Default: /aws/service/marketplace/prod-ziq7qsqxesi46/latest
     Description: SSM parameter naming the newest DebugLogManager image, for the Update button (supplied by AWS Marketplace).
   ProductCode:
     Type: String
-    Default: ""
+    Default: bb8bo1fy1k2ub2jdde915m0in
     Description: Marketplace product code, for metering (supplied by AWS Marketplace).
 
 Conditions:
