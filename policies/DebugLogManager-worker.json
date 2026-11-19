@@ -506,6 +506,12 @@
           }
         },
         {
+          "Sid": "ScpCheckBeforeTrail",
+          "Effect": "Allow",
+          "Action": "iam:SimulatePrincipalPolicy",
+          "Resource": "arn:aws:iam::<account-id>:role/DebugLogManager-worker"
+        },
+        {
           "Sid": "BucketLogging",
           "Effect": "Allow",
           "Action": [

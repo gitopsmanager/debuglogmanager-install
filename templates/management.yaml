@@ -3,7 +3,8 @@ Description: >-
   DebugLogManager, in the account that runs IAM Identity Center (usually the
   management account). One read-only role: at sign-in DebugLogManager lists
   the accounts a user has any Identity Center assignment in, and shows them
-  only those. Four read actions, nothing else. Deploy it after the install
+  only those; it also reads the names of OUs in scope for the Allowed sources
+  tree. Five read actions, nothing else. Deploy it after the install
   stack, with that stack's tools account and ExternalId.
 
 Parameters:
@@ -22,7 +23,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: DebugLogManager-identity-reader
-      Description: DebugLogManager reads which accounts a user has IAM Identity Center assignments in (read-only).
+      Description: DebugLogManager reads which accounts a user has IAM Identity Center assignments in, and OU names (read-only).
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -65,6 +66,11 @@ Resources:
                   - identitystore:GetUserId
                   - identitystore:ListGroupMembershipsForMember
                 Resource: "*"
+              # The names of the OUs in scope, for the Allowed sources tree.
+              - Sid: OuNames
+                Effect: Allow
+                Action: organizations:DescribeOrganizationalUnit
+                Resource: !Sub "arn:${AWS::Partition}:organizations::${AWS::AccountId}:ou/o-*/ou-*"
 
 Outputs:
   IdentityReaderRoleArn:

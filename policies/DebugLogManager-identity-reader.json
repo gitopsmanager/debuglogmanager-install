@@ -55,6 +55,12 @@
             "identitystore:ListGroupMembershipsForMember"
           ],
           "Resource": "*"
+        },
+        {
+          "Sid": "OuNames",
+          "Effect": "Allow",
+          "Action": "organizations:DescribeOrganizationalUnit",
+          "Resource": "arn:aws:organizations::<management-account-id>:ou/o-*/ou-*"
         }
       ]
     }

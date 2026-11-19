@@ -106,6 +106,7 @@ Resources:
               - Sid: ReadStackSets
                 Effect: Allow
                 Action: ["cloudformation:ListStackInstances", "cloudformation:DescribeStackInstance", "cloudformation:DescribeStackSet",
+                         "cloudformation:ListStackSetOperations", "cloudformation:ListStackSetOperationResults",
                          "organizations:ListDelegatedAdministrators"]
                 Resource: "*"
               - Sid: WhoChangedWhatsAllowed
@@ -950,6 +951,13 @@ Resources:
                                "cloudtrail:StartLogging", "cloudtrail:StopLogging", "cloudtrail:GetTrailStatus", "cloudtrail:DeleteTrail"]
                       Resource: !Sub "arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/dlm-*"
                       Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref CloudtrailDataEventsRegions] } }
+                    - !Ref AWS::NoValue
+                  - !If
+                    - CtdeOn
+                    - Sid: ScpCheckBeforeTrail
+                      Effect: Allow
+                      Action: iam:SimulatePrincipalPolicy
+                      Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/DebugLogManager-worker"
                     - !Ref AWS::NoValue
                   - !If
                     - S3alOn

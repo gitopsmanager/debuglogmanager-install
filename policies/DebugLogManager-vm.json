@@ -52,6 +52,8 @@
             "cloudformation:ListStackInstances",
             "cloudformation:DescribeStackInstance",
             "cloudformation:DescribeStackSet",
+            "cloudformation:ListStackSetOperations",
+            "cloudformation:ListStackSetOperationResults",
             "organizations:ListDelegatedAdministrators"
           ],
           "Resource": "*"

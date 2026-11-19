@@ -12,7 +12,7 @@ footprint in your accounts.
 | [`templates/install.yaml`](templates/install.yaml) | the tools account (from AWS Marketplace) | The VM (no inbound ports, no SSH key, IMDSv2 only) and its role `DebugLogManager-vm`; the audit bucket (Object Lock, Governance, 1 year); and the two StackSets below. The Update button updates this stack as the VM role, which can only replace its own VM. Generated from `templates/src/install.src.yaml` by `tools/build_install.py`. |
 | [`templates/reader.yaml`](templates/reader.yaml) | every account in scope (StackSet) | `DebugLogManager-reader`: read-only. Lists resources and their current logging settings. |
 | [`templates/worker.yaml`](templates/worker.yaml) | every account in scope, one region (StackSet) | `DebugLogManager-worker`: turns logging on and off, only for the sources and regions you allow. Inert at install. |
-| [`templates/management.yaml`](templates/management.yaml) | the account running IAM Identity Center | `DebugLogManager-identity-reader`: four read actions, to list a user's account assignments at sign-in. |
+| [`templates/management.yaml`](templates/management.yaml) | the account running IAM Identity Center | `DebugLogManager-identity-reader`: five read actions, to list a user's account assignments at sign-in and show OU names. |
 
 Every role's permissions are also in [`policies/`](policies/) as plain JSON
 (generated from these templates by `tools/export_policies.py`), with the
@@ -36,10 +36,23 @@ find the VM and open a port-forwarding tunnel to it, never a shell).
 4. **Connect:** open the SSM tunnel to the VM (tag `Name=debuglogmanager`) and
    sign in with `aws eks get-token --cluster-name debuglogmanager`.
 
-Uninstalling: delete the install stack (it removes the StackSets and their
-roles in every account) and the management stack. The audit bucket is kept,
-because its entries are locked; empty and delete it when you no longer need
-it.
+Uninstalling:
+
+1. In DebugLogManager, **Install → Prepare to uninstall**. It turns off any
+   logging still on and deletes its log buckets and log groups now (they are
+   otherwise deleted 7 days after turn-off, which can't happen once it's gone).
+2. Delete the management stack, then the install stack (it removes the
+   StackSets and their roles in every account).
+3. The audit bucket is kept, because its entries are locked; empty and delete
+   it when you no longer need the audit.
+
+Skipped step 1? Whatever is left is tagged `dlm:managed=true`. Its logs expire
+within 7 days and an empty bucket costs nothing; to remove them, in each
+account and region:
+
+```bash
+aws resourcegroupstaggingapi get-resources --tag-filters Key=dlm:managed,Values=true   --query "ResourceTagMappingList[].ResourceARN" --output text
+```
 
 ## How the roles are protected
 

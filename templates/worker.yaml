@@ -557,6 +557,16 @@ Resources:
               Resource: !Sub "arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/dlm-*"
               Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref CloudtrailDataEventsRegions] } }
             - !Ref AWS::NoValue
+          # Before creating a trail: ask the IAM policy simulator whether an
+          # SCP blocks this role's trail actions (it evaluates SCPs; this
+          # role only, and IAM is global, so no region condition).
+          - !If
+            - CtdeOn
+            - Sid: ScpCheckBeforeTrail
+              Effect: Allow
+              Action: iam:SimulatePrincipalPolicy
+              Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/DebugLogManager-worker"
+            - !Ref AWS::NoValue
           - !If
             - S3alOn
             - Sid: BucketLogging

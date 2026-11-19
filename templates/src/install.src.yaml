@@ -105,6 +105,7 @@ Resources:
               - Sid: ReadStackSets
                 Effect: Allow
                 Action: ["cloudformation:ListStackInstances", "cloudformation:DescribeStackInstance", "cloudformation:DescribeStackSet",
+                         "cloudformation:ListStackSetOperations", "cloudformation:ListStackSetOperationResults",
                          "organizations:ListDelegatedAdministrators"]
                 Resource: "*"
               - Sid: WhoChangedWhatsAllowed
