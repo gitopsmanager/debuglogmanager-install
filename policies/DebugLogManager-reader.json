@@ -1,0 +1,114 @@
+{
+  "Role": "DebugLogManager-reader",
+  "TrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "DebugLogManagerOnly",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:AssumeRole",
+        "Condition": {
+          "StringEquals": {
+            "sts:ExternalId": "<external-id>"
+          },
+          "ArnLike": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "Null": {
+            "sts:SourceIdentity": "false"
+          }
+        }
+      },
+      {
+        "Sid": "DebugLogManagerNamesWhoAsked",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:SetSourceIdentity",
+        "Condition": {
+          "ArnLike": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "StringLike": {
+            "sts:SourceIdentity": "?*"
+          }
+        }
+      }
+    ]
+  },
+  "AwsManagedPolicies": [],
+  "Policies": {
+    "read-logging-settings": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AccountName",
+          "Effect": "Allow",
+          "Action": "account:GetAccountInformation",
+          "Resource": "*"
+        },
+        {
+          "Sid": "WorkerStackParameters",
+          "Effect": "Allow",
+          "Action": "cloudformation:DescribeStacks",
+          "Resource": "arn:aws:cloudformation:*:<account-id>:stack/DebugLogManager-worker/*"
+        },
+        {
+          "Sid": "ResourcesAndTheirLogging",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:DescribeVpcs",
+            "ec2:DescribeFlowLogs",
+            "ec2:DescribeRegions",
+            "elasticloadbalancing:DescribeLoadBalancers",
+            "elasticloadbalancing:DescribeLoadBalancerAttributes",
+            "elasticloadbalancing:DescribeTags",
+            "s3:ListAllMyBuckets",
+            "s3:GetBucketLocation",
+            "s3:GetBucketLogging",
+            "lambda:ListFunctions",
+            "lambda:GetFunctionConfiguration",
+            "cloudtrail:DescribeTrails",
+            "cloudtrail:GetTrailStatus",
+            "cloudtrail:GetEventSelectors",
+            "cloudtrail:LookupEvents",
+            "dynamodb:ListTables",
+            "logs:DescribeLogGroups",
+            "logs:DescribeSubscriptionFilters",
+            "logs:DescribeMetricFilters",
+            "logs:DescribeDeliverySources",
+            "cloudwatch:GetMetricStatistics",
+            "ec2:DescribeTransitGateways",
+            "elasticloadbalancing:DescribeListeners",
+            "network-firewall:ListFirewalls",
+            "network-firewall:DescribeLoggingConfiguration",
+            "logs:ListLogDeliveries",
+            "route53resolver:ListResolverQueryLogConfigs",
+            "route53resolver:ListResolverQueryLogConfigAssociations",
+            "route53:ListHostedZones",
+            "route53:ListQueryLoggingConfigs",
+            "cloudfront:ListDistributions",
+            "cloudfront:GetDistributionConfig",
+            "wafv2:ListWebACLs",
+            "wafv2:GetLoggingConfiguration",
+            "apigateway:GET",
+            "states:ListStateMachines",
+            "states:DescribeStateMachine",
+            "rds:DescribeDBInstances",
+            "eks:ListClusters",
+            "eks:DescribeCluster",
+            "elasticache:DescribeReplicationGroups",
+            "es:ListDomainNames",
+            "es:DescribeDomain",
+            "es:DescribeDomains"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }
+  }
+}

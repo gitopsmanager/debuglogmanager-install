@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  DebugLogManager install, in the tools account: the VM (no inbound ports, no
+  SSH key), its role, the audit bucket (Object Lock), and the reader and
+  worker StackSets deployed to the accounts in scope. The tools account must
+  be a StackSets delegated administrator (see the install steps). Built from
+  templates/src/install.src.yaml by tools/build_install.py: edit the source,
+  not templates/install.yaml.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Network }
+        Parameters: [SubnetId, VpcId]
+      - Label: { default: Scope }
+        Parameters: [ScopeOrganizationalUnitIds, ExcludedAccountIds]
+      - Label: { default: Sign-in }
+        Parameters: [AdminPermissionSets, IdentityCenterAccountId, IdentityCenterRegion]
+      - Label: { default: Debugging }
+        Parameters: [OfferedRegions]
+      - Label: { default: VM }
+        Parameters: [ImageId, InstanceType, AmiParameter]
+      - Label: { default: Marketplace }
+        Parameters: [ProductCode]
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC of the subnet.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A subnet with outbound internet access (a NAT gateway, or a public subnet). Nothing reaches the VM from outside.
+  ScopeOrganizationalUnitIds:
+    Type: CommaDelimitedList
+    Description: Where DebugLogManager can debug. OU ids (ou-...), or the root id (r-...) for the whole organization. Accounts added to these OUs later are covered automatically.
+  ExcludedAccountIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Accounts under those OUs to leave out (12-digit ids, comma separated), or empty.
+  AdminPermissionSets:
+    Type: String
+    Default: AdministratorAccess,AWSAdministratorAccess
+    Description: IAM Identity Center permission sets that sign in to DebugLogManager as Admin (the rest are Users).
+  IdentityCenterAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+    Description: The account that runs IAM Identity Center (the management account, or its delegated administrator). It holds the DebugLogManager-identity-reader role (the management stack).
+  IdentityCenterRegion:
+    Type: String
+    Default: us-east-1
+    Description: IAM Identity Center's home region.
+  OfferedRegions:
+    Type: CommaDelimitedList
+    Description: Regions DebugLogManager offers for debugging, e.g. eu-west-1,us-east-1.
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: The DebugLogManager image (supplied by AWS Marketplace).
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t4g.large]
+  AmiParameter:
+    Type: String
+    Default: ""
+    Description: SSM parameter naming the newest DebugLogManager image, for the Update button (supplied by AWS Marketplace).
+  ProductCode:
+    Type: String
+    Default: ""
+    Description: Marketplace product code, for metering (supplied by AWS Marketplace).
+
+Conditions:
+  HasExcluded: !Not [!Equals [!Join ["", !Ref ExcludedAccountIds], ""]]
+
+Resources:
+  # ── The VM's role: everything DebugLogManager does starts here ─────────────
+  VmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DebugLogManager-vm
+      Description: The DebugLogManager VM. Changes nothing itself; assumes the reader and worker roles to read and change logging.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: debuglogmanager
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AssumeDebugLogManagerRoles
+                Effect: Allow
+                Action: ["sts:AssumeRole", "sts:SetSourceIdentity"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::*:role/DebugLogManager-reader"
+                  - !Sub "arn:${AWS::Partition}:iam::*:role/DebugLogManager-worker"
+                  - !Sub "arn:${AWS::Partition}:iam::${IdentityCenterAccountId}:role/DebugLogManager-identity-reader"
+              - Sid: StateAndAudit
+                Effect: Allow
+                Action: ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+                Resource: [!GetAtt StateBucket.Arn, !Sub "${StateBucket.Arn}/*"]
+              - Sid: ReadStackSets
+                Effect: Allow
+                Action: ["cloudformation:ListStackInstances", "cloudformation:DescribeStackInstance", "cloudformation:DescribeStackSet",
+                         "organizations:ListDelegatedAdministrators"]
+                Resource: "*"
+              - Sid: WhoChangedWhatsAllowed
+                Effect: Allow
+                Action: cloudtrail:LookupEvents
+                Resource: "*"
+              - Sid: SignInSessionCheck
+                Effect: Allow
+                Action: ssm:DescribeSessions
+                Resource: "*"
+              - Sid: NewestImage
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: "*"
+              - Sid: Metering
+                Effect: Allow
+                Action: aws-marketplace:MeterUsage
+                Resource: "*"
+              # The Update button: UpdateStack on this stack with the previous
+              # template and only ImageId changed. No service role is passed
+              # (CloudFormation would keep it on the stack and run every later
+              # upgrade with it), so CloudFormation acts with this role, and
+              # what follows is all it can do: replace this stack's VM. It
+              # has no IAM write, so no update can change its own permissions.
+              - Sid: UpdateOwnStack
+                Effect: Allow
+                Action: ["cloudformation:DescribeStacks", "cloudformation:DescribeStackEvents", "cloudformation:UpdateStack"]
+                Resource: !Ref AWS::StackId
+              - Sid: ReplaceTheVm
+                Effect: Allow
+                Action: ["ec2:RunInstances", "ec2:CreateTags", "ec2:Describe*", "ssm:GetParameters"]
+                Resource: "*"
+              - Sid: TerminateOnlyThisStacksVm
+                Effect: Allow
+                Action: ec2:TerminateInstances
+                Resource: "*"
+                Condition: { StringEquals: { "aws:ResourceTag/aws:cloudformation:stack-id": !Ref AWS::StackId } }
+              - Sid: PassOwnRoleToTheNewVm
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/DebugLogManager-vm"
+                Condition: { StringEquals: { iam:PassedToService: ec2.amazonaws.com } }
+              - Sid: ReadOwnRole
+                Effect: Allow
+                Action: iam:GetRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/DebugLogManager-vm"
+
+  VmProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: DebugLogManager-vm
+      Roles: [!Ref VmRole]
+
+  # ── State and audit: Object Lock, Governance mode, 1 year ──────────────────
+  # Kept when the stack is deleted (its entries are locked): empty and delete
+  # it with the command on the website once you no longer need the audit.
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule: { DefaultRetention: { Mode: GOVERNANCE, Days: 365 } }
+      VersioningConfiguration: { Status: Enabled }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      Tags: [{ Key: dlm:managed, Value: "true" }]
+
+  # ── The VM: no inbound rules, no key, IMDSv2 only ──────────────────────────
+  VmSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: DebugLogManager VM. No inbound rules; reached only through SSM port forwarding.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: AWS APIs over HTTPS }
+      Tags: [{ Key: Name, Value: debuglogmanager }]
+
+  Vm:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [!Ref VmSecurityGroup]
+      IamInstanceProfile: !Ref VmProfile
+      MetadataOptions: { HttpTokens: required, HttpPutResponseHopLimit: 1, HttpEndpoint: enabled }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 20, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true }
+      Tags: [{ Key: Name, Value: debuglogmanager }]
+      # The app's settings: written at every boot of a new VM, never baked
+      # into the image.
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -e
+            install -d -m 0750 -o debuglogmanager -g debuglogmanager /etc/debuglogmanager /var/lib/debuglogmanager
+            cat > /etc/debuglogmanager/env <<'ENV'
+            DLM_MODE=aws
+            DLM_STORE=s3
+            DLM_STATE_BUCKET=${StateBucket}
+            DLM_HOME_REGION=${AWS::Region}
+            DLM_PAIRS_REGION=${AWS::Region}
+            DLM_EXTERNAL_ID=${ExternalId}
+            DLM_REGIONS=${Regions}
+            DLM_ADMIN_PERMISSION_SETS=${AdminPermissionSets}
+            DLM_IDENTITY_ROLE_ARN=arn:${AWS::Partition}:iam::${IdentityCenterAccountId}:role/DebugLogManager-identity-reader
+            DLM_IDENTITY_REGION=${IdentityCenterRegion}
+            DLM_STACK_NAME=${AWS::StackName}
+            DLM_AMI_PARAMETER=${AmiParameter}
+            DLM_PRODUCT_CODE=${ProductCode}
+            DLM_DATA_DIR=/var/lib/debuglogmanager
+            ENV
+            chmod 0640 /etc/debuglogmanager/env
+            chown root:debuglogmanager /etc/debuglogmanager/env
+            systemctl restart debuglogmanager
+          - ExternalId: !Select [2, !Split ["/", !Ref AWS::StackId]]
+            Regions: !Join [",", !Ref OfferedRegions]
+
+  # ── The accounts in scope: reader and worker roles, by StackSet ────────────
+  # One region only: they're IAM roles. Managed from this account as
+  # StackSets delegated administrator; accounts joining a scoped OU get them
+  # automatically.
+  ReaderStackSet:
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      StackSetName: DebugLogManager-reader
+      Description: DebugLogManager reader role (read-only) in every account in scope.
+      PermissionModel: SERVICE_MANAGED
+      CallAs: DELEGATED_ADMIN
+      AutoDeployment: { Enabled: true, RetainStacksOnAccountRemoval: false }
+      ManagedExecution: { Active: true }
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      OperationPreferences: { MaxConcurrentPercentage: 100, FailureTolerancePercentage: 100, RegionConcurrencyType: PARALLEL }
+      Parameters:
+        - { ParameterKey: ToolsAccountId, ParameterValue: !Ref AWS::AccountId }
+        - { ParameterKey: AppPrincipalArn, ParameterValue: !GetAtt VmRole.Arn }
+        - { ParameterKey: ExternalId, ParameterValue: !Select [2, !Split ["/", !Ref AWS::StackId]] }
+      StackInstancesGroup:
+        - Regions: [!Ref AWS::Region]
+          DeploymentTargets: !If
+            - HasExcluded
+            - { OrganizationalUnitIds: !Ref ScopeOrganizationalUnitIds, AccountFilterType: DIFFERENCE, Accounts: !Ref ExcludedAccountIds }
+            - { OrganizationalUnitIds: !Ref ScopeOrganizationalUnitIds }
+      TemplateBody: |
+        __READER_TEMPLATE__
+
+  # Inert at install: nothing allowed, trust closed. An admin allows sources
+  # per OU or account with update-stack-instances (DebugLogManager's Allowed
+  # sources page shows the command).
+  WorkerStackSet:
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      StackSetName: DebugLogManager-worker
+      Description: DebugLogManager worker role in every account in scope; inert until an admin allows sources.
+      PermissionModel: SERVICE_MANAGED
+      CallAs: DELEGATED_ADMIN
+      AutoDeployment: { Enabled: true, RetainStacksOnAccountRemoval: false }
+      ManagedExecution: { Active: true }
+      Capabilities: [CAPABILITY_NAMED_IAM]
+      OperationPreferences: { MaxConcurrentPercentage: 100, FailureTolerancePercentage: 100, RegionConcurrencyType: PARALLEL }
+      Parameters:
+        - { ParameterKey: ToolsAccountId, ParameterValue: !Ref AWS::AccountId }
+        - { ParameterKey: AppPrincipalArn, ParameterValue: !GetAtt VmRole.Arn }
+        - { ParameterKey: ExternalId, ParameterValue: !Select [2, !Split ["/", !Ref AWS::StackId]] }
+      StackInstancesGroup:
+        - Regions: [!Ref AWS::Region]
+          DeploymentTargets: !If
+            - HasExcluded
+            - { OrganizationalUnitIds: !Ref ScopeOrganizationalUnitIds, AccountFilterType: DIFFERENCE, Accounts: !Ref ExcludedAccountIds }
+            - { OrganizationalUnitIds: !Ref ScopeOrganizationalUnitIds }
+      TemplateBody: |
+        __WORKER_TEMPLATE__
+
+Outputs:
+  ExternalId:
+    Description: The install's ExternalId (the management stack needs it).
+    Value: !Select [2, !Split ["/", !Ref AWS::StackId]]
+  VmInstanceId:
+    Value: !Ref Vm
+  StateBucket:
+    Value: !Ref StateBucket
+  VmRoleArn:
+    Value: !GetAtt VmRole.Arn

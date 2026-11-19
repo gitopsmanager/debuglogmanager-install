@@ -1,0 +1,697 @@
+{
+  "Role": "DebugLogManager-worker",
+  "TrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "DebugLogManagerNamesWhoAsked",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:SetSourceIdentity",
+        "Condition": {
+          "ArnLike": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "StringLike": {
+            "sts:SourceIdentity": "?*"
+          }
+        }
+      },
+      {
+        "Sid": "DebugLogManagerOnly",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:AssumeRole",
+        "Condition": {
+          "StringEquals": {
+            "sts:ExternalId": "<external-id>"
+          },
+          "ArnLike": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "Null": {
+            "sts:SourceIdentity": "false"
+          }
+        }
+      }
+    ]
+  },
+  "AwsManagedPolicies": [],
+  "Policies": {
+    "guards": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "NeverControlTower",
+          "Effect": "Deny",
+          "Action": [
+            "logs:PutRetentionPolicy",
+            "logs:DeleteRetentionPolicy",
+            "logs:DeleteLogGroup"
+          ],
+          "Resource": "arn:aws:logs:*:<account-id>:log-group:*aws-controltower*"
+        }
+      ]
+    },
+    "DebugLogManager-worker-destinations": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "OwnBuckets",
+          "Effect": "Allow",
+          "Action": [
+            "s3:CreateBucket",
+            "s3:PutBucketTagging",
+            "s3:GetBucketTagging",
+            "s3:PutEncryptionConfiguration",
+            "s3:PutBucketPublicAccessBlock",
+            "s3:PutLifecycleConfiguration",
+            "s3:PutBucketOwnershipControls",
+            "s3:PutBucketPolicy",
+            "s3:GetBucketPolicy",
+            "s3:GetBucketLocation",
+            "s3:ListBucket",
+            "s3:ListBucketVersions",
+            "s3:DeleteBucket"
+          ],
+          "Resource": "arn:aws:s3:::dlm-*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>",
+                "<allowed regions: TgwFlowLogsRegions>",
+                "<allowed regions: NetworkFirewallRegions>",
+                "<allowed regions: ResolverQueryLogsRegions>",
+                "<allowed regions: AlbAccessLogsRegions>",
+                "<allowed regions: NlbAccessLogsRegions>",
+                "<allowed regions: CloudtrailDataEventsRegions>",
+                "<allowed regions: S3AccessLogsRegions>",
+                "us-east-1"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "OwnBucketObjects",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:DeleteObject",
+            "s3:DeleteObjectVersion"
+          ],
+          "Resource": "arn:aws:s3:::dlm-*/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>",
+                "<allowed regions: TgwFlowLogsRegions>",
+                "<allowed regions: NetworkFirewallRegions>",
+                "<allowed regions: ResolverQueryLogsRegions>",
+                "<allowed regions: AlbAccessLogsRegions>",
+                "<allowed regions: NlbAccessLogsRegions>",
+                "<allowed regions: CloudtrailDataEventsRegions>",
+                "<allowed regions: S3AccessLogsRegions>",
+                "us-east-1"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "OwnLogGroups",
+          "Effect": "Allow",
+          "Action": [
+            "logs:CreateLogGroup",
+            "logs:PutRetentionPolicy",
+            "logs:TagResource",
+            "logs:TagLogGroup",
+            "logs:DeleteLogGroup",
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents",
+            "logs:DescribeLogStreams"
+          ],
+          "Resource": [
+            "arn:aws:logs:*:<account-id>:log-group:/debuglogmanager/*",
+            "arn:aws:logs:*:<account-id>:log-group:aws-waf-logs-dlm-*",
+            "arn:aws:logs:*:<account-id>:log-group:/aws/route53/dlm-*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>",
+                "<allowed regions: TgwFlowLogsRegions>",
+                "<allowed regions: NetworkFirewallRegions>",
+                "<allowed regions: ResolverQueryLogsRegions>",
+                "<allowed regions: WafLogsRegions>",
+                "<allowed regions: ApiGatewayLogsRegions>",
+                "<allowed regions: StepFunctionsLogsRegions>",
+                "<allowed regions: ElasticacheLogsRegions>",
+                "<allowed regions: OpensearchLogsRegions>",
+                "us-east-1"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "FindLogGroups",
+          "Effect": "Allow",
+          "Action": "logs:DescribeLogGroups",
+          "Resource": "*"
+        },
+        {
+          "Sid": "VendedLogDelivery",
+          "Effect": "Allow",
+          "Action": [
+            "logs:CreateLogDelivery",
+            "logs:GetLogDelivery",
+            "logs:UpdateLogDelivery",
+            "logs:DeleteLogDelivery",
+            "logs:ListLogDeliveries"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Sid": "LogGroupResourcePolicy",
+          "Effect": "Allow",
+          "Action": [
+            "logs:PutResourcePolicy",
+            "logs:DescribeResourcePolicies"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "DebugLogManager-worker-network": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "VpcFlowLogs",
+          "Effect": "Allow",
+          "Action": "ec2:CreateFlowLogs",
+          "Resource": [
+            "arn:aws:ec2:*:<account-id>:vpc/*",
+            "arn:aws:ec2:*:<account-id>:vpc-flow-log/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "TgwFlowLogs",
+          "Effect": "Allow",
+          "Action": "ec2:CreateFlowLogs",
+          "Resource": [
+            "arn:aws:ec2:*:<account-id>:transit-gateway/*",
+            "arn:aws:ec2:*:<account-id>:vpc-flow-log/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: TgwFlowLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "TagAndDeleteOwnFlowLogs",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:CreateTags",
+            "ec2:DeleteFlowLogs"
+          ],
+          "Resource": "arn:aws:ec2:*:<account-id>:vpc-flow-log/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>",
+                "<allowed regions: TgwFlowLogsRegions>"
+              ],
+              "aws:ResourceTag/dlm:managed": "true"
+            }
+          }
+        },
+        {
+          "Sid": "TagOnCreate",
+          "Effect": "Allow",
+          "Action": "ec2:CreateTags",
+          "Resource": "arn:aws:ec2:*:<account-id>:vpc-flow-log/*",
+          "Condition": {
+            "StringEquals": {
+              "ec2:CreateAction": "CreateFlowLogs",
+              "aws:RequestedRegion": [
+                "<allowed regions: VpcFlowLogsRegions>",
+                "<allowed regions: TgwFlowLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "DescribeFlowLogs",
+          "Effect": "Allow",
+          "Action": "ec2:DescribeFlowLogs",
+          "Resource": "*"
+        },
+        {
+          "Sid": "PassFlowLogsDeliveryRole",
+          "Effect": "Allow",
+          "Action": "iam:PassRole",
+          "Resource": "arn:aws:iam::<account-id>:role/DebugLogManager-flowlogs-delivery",
+          "Condition": {
+            "StringEquals": {
+              "iam:PassedToService": "vpc-flow-logs.amazonaws.com"
+            }
+          }
+        },
+        {
+          "Sid": "NetworkFirewallLogging",
+          "Effect": "Allow",
+          "Action": [
+            "network-firewall:UpdateLoggingConfiguration",
+            "network-firewall:DescribeLoggingConfiguration"
+          ],
+          "Resource": "arn:aws:network-firewall:*:<account-id>:firewall/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: NetworkFirewallRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ResolverQueryLogs",
+          "Effect": "Allow",
+          "Action": [
+            "route53resolver:CreateResolverQueryLogConfig",
+            "route53resolver:AssociateResolverQueryLogConfig",
+            "route53resolver:DisassociateResolverQueryLogConfig",
+            "route53resolver:DeleteResolverQueryLogConfig",
+            "route53resolver:GetResolverQueryLogConfig",
+            "route53resolver:ListResolverQueryLogConfigs",
+            "route53resolver:ListResolverQueryLogConfigAssociations",
+            "route53resolver:TagResource",
+            "ec2:DescribeVpcs"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: ResolverQueryLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ResolverServiceLinkedRole",
+          "Effect": "Allow",
+          "Action": "iam:CreateServiceLinkedRole",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "iam:AWSServiceName": "route53resolver.amazonaws.com"
+            }
+          }
+        },
+        {
+          "Sid": "AlbAccessLogs",
+          "Effect": "Allow",
+          "Action": [
+            "elasticloadbalancing:ModifyLoadBalancerAttributes",
+            "elasticloadbalancing:DescribeLoadBalancerAttributes"
+          ],
+          "Resource": "arn:aws:elasticloadbalancing:*:<account-id>:loadbalancer/app/*/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: AlbAccessLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "NlbAccessLogs",
+          "Effect": "Allow",
+          "Action": [
+            "elasticloadbalancing:ModifyLoadBalancerAttributes",
+            "elasticloadbalancing:DescribeLoadBalancerAttributes"
+          ],
+          "Resource": "arn:aws:elasticloadbalancing:*:<account-id>:loadbalancer/net/*/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: NlbAccessLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "DescribeLoadBalancerAttributes",
+          "Effect": "Allow",
+          "Action": "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "Resource": "*"
+        }
+      ]
+    },
+    "DebugLogManager-worker-edge": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "CloudFrontLogDelivery",
+          "Effect": "Allow",
+          "Action": [
+            "logs:PutDeliverySource",
+            "logs:GetDeliverySource",
+            "logs:DeleteDeliverySource",
+            "logs:PutDeliveryDestination",
+            "logs:GetDeliveryDestination",
+            "logs:DeleteDeliveryDestination",
+            "logs:CreateDelivery",
+            "logs:GetDelivery",
+            "logs:DeleteDelivery",
+            "logs:DescribeDeliveries",
+            "logs:DescribeDeliverySources",
+            "logs:TagResource",
+            "cloudfront:AllowVendedLogDeliveryForResource"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "us-east-1"
+            }
+          }
+        },
+        {
+          "Sid": "WafRegionalLogging",
+          "Effect": "Allow",
+          "Action": [
+            "wafv2:PutLoggingConfiguration",
+            "wafv2:DeleteLoggingConfiguration",
+            "wafv2:GetLoggingConfiguration"
+          ],
+          "Resource": "arn:aws:wafv2:*:<account-id>:regional/webacl/*/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: WafLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "WafCloudFrontLogging",
+          "Effect": "Allow",
+          "Action": [
+            "wafv2:PutLoggingConfiguration",
+            "wafv2:DeleteLoggingConfiguration",
+            "wafv2:GetLoggingConfiguration"
+          ],
+          "Resource": "arn:aws:wafv2:us-east-1:<account-id>:global/webacl/*/*"
+        },
+        {
+          "Sid": "ApiGatewayStageLogging",
+          "Effect": "Allow",
+          "Action": [
+            "apigateway:GET",
+            "apigateway:PATCH"
+          ],
+          "Resource": [
+            "arn:aws:apigateway:*::/restapis/*/stages/*",
+            "arn:aws:apigateway:*::/account"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: ApiGatewayLogsRegions>",
+                "<allowed regions: ApiGatewayExecutionRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ApiGatewayAccountRole",
+          "Effect": "Allow",
+          "Action": "iam:PassRole",
+          "Resource": "arn:aws:iam::<account-id>:role/DebugLogManager-apigateway-cloudwatch",
+          "Condition": {
+            "StringEquals": {
+              "iam:PassedToService": "apigateway.amazonaws.com"
+            }
+          }
+        },
+        {
+          "Sid": "ReadExecutionLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents"
+          ],
+          "Resource": "arn:aws:logs:*:<account-id>:log-group:API-Gateway-Execution-Logs_*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: ApiGatewayExecutionRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "Route53QueryLogging",
+          "Effect": "Allow",
+          "Action": [
+            "route53:CreateQueryLoggingConfig",
+            "route53:DeleteQueryLoggingConfig",
+            "route53:GetQueryLoggingConfig",
+            "route53:ListQueryLoggingConfigs"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Sid": "AlwaysOneStatement",
+          "Effect": "Allow",
+          "Action": "wafv2:ListWebACLs",
+          "Resource": "*"
+        }
+      ]
+    },
+    "DebugLogManager-worker-compute": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "OwnTrailsOnly",
+          "Effect": "Allow",
+          "Action": [
+            "cloudtrail:CreateTrail",
+            "cloudtrail:AddTags",
+            "cloudtrail:PutEventSelectors",
+            "cloudtrail:GetEventSelectors",
+            "cloudtrail:StartLogging",
+            "cloudtrail:StopLogging",
+            "cloudtrail:GetTrailStatus",
+            "cloudtrail:DeleteTrail"
+          ],
+          "Resource": "arn:aws:cloudtrail:*:<account-id>:trail/dlm-*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: CloudtrailDataEventsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "BucketLogging",
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutBucketLogging",
+            "s3:GetBucketLogging"
+          ],
+          "Resource": "arn:aws:s3:::*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: S3AccessLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "LambdaLoggingConfig",
+          "Effect": "Allow",
+          "Action": [
+            "lambda:UpdateFunctionConfiguration",
+            "lambda:GetFunctionConfiguration"
+          ],
+          "Resource": "arn:aws:lambda:*:<account-id>:function:*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: LambdaDebugRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "StepFunctionsLogging",
+          "Effect": "Allow",
+          "Action": [
+            "states:DescribeStateMachine",
+            "states:UpdateStateMachine"
+          ],
+          "Resource": "arn:aws:states:*:<account-id>:stateMachine:*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: StepFunctionsLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "RdsLogExports",
+          "Effect": "Allow",
+          "Action": [
+            "rds:ModifyDBInstance",
+            "rds:DescribeDBInstances",
+            "rds:DescribeDBEngineVersions"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: RdsLogExportsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "EksControlPlaneLogging",
+          "Effect": "Allow",
+          "Action": [
+            "eks:DescribeCluster",
+            "eks:UpdateClusterConfig",
+            "eks:DescribeUpdate"
+          ],
+          "Resource": "arn:aws:eks:*:<account-id>:cluster/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: EksControlPlaneRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ElastiCacheLogDelivery",
+          "Effect": "Allow",
+          "Action": [
+            "elasticache:ModifyReplicationGroup",
+            "elasticache:DescribeReplicationGroups"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: ElasticacheLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "OpenSearchLogPublishing",
+          "Effect": "Allow",
+          "Action": [
+            "es:DescribeDomain",
+            "es:UpdateDomainConfig"
+          ],
+          "Resource": "arn:aws:es:*:<account-id>:domain/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: OpensearchLogsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ReadLambdaLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents"
+          ],
+          "Resource": "arn:aws:logs:*:<account-id>:log-group:/aws/lambda/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: LambdaDebugRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ReadRdsLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents"
+          ],
+          "Resource": "arn:aws:logs:*:<account-id>:log-group:/aws/rds/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: RdsLogExportsRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ReadEksLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents"
+          ],
+          "Resource": "arn:aws:logs:*:<account-id>:log-group:/aws/eks/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: EksControlPlaneRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "ReadExistingLogGroups",
+          "Effect": "Allow",
+          "Action": [
+            "logs:DescribeLogGroups",
+            "logs:DescribeLogStreams",
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": [
+                "<allowed regions: CloudwatchReadRegions>"
+              ]
+            }
+          }
+        },
+        {
+          "Sid": "AlwaysOneStatement",
+          "Effect": "Allow",
+          "Action": "lambda:GetAccountSettings",
+          "Resource": "*"
+        }
+      ]
+    }
+  }
+}

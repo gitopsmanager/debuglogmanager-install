@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  DebugLogManager, in the account that runs IAM Identity Center (usually the
+  management account). One read-only role: at sign-in DebugLogManager lists
+  the accounts a user has any Identity Center assignment in, and shows them
+  only those. Four read actions, nothing else. Deploy it after the install
+  stack, with that stack's tools account and ExternalId.
+
+Parameters:
+  ToolsAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+    Description: The account DebugLogManager runs in (where the install stack is).
+  ExternalId:
+    Type: String
+    MinLength: 8
+    NoEcho: true
+    Description: The install stack's ExternalId output.
+
+Resources:
+  IdentityReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DebugLogManager-identity-reader
+      Description: DebugLogManager reads which accounts a user has IAM Identity Center assignments in (read-only).
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Only the DebugLogManager VM's role, with the install's ExternalId.
+          # Matched by ARN condition, so this stack can be created before or
+          # after the install stack.
+          - Sid: DebugLogManagerOnly
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+              ArnEquals:
+                aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:role/DebugLogManager-vm"
+              "Null":
+                sts:SourceIdentity: "false"
+          - Sid: DebugLogManagerNamesWhoAsked
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+            Action: sts:SetSourceIdentity
+            Condition:
+              ArnEquals:
+                aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:role/DebugLogManager-vm"
+              StringLike:
+                sts:SourceIdentity: "?*"
+      Policies:
+        - PolicyName: read-identity-center-assignments
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AccountAssignments
+                Effect: Allow
+                Action:
+                  - sso:ListInstances
+                  - sso:ListAccountAssignmentsForPrincipal
+                  - identitystore:GetUserId
+                  - identitystore:ListGroupMembershipsForMember
+                Resource: "*"
+
+Outputs:
+  IdentityReaderRoleArn:
+    Value: !GetAtt IdentityReaderRole.Arn

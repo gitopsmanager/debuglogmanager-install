@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  DebugLogManager reader role. Read-only: lists resources and their current
+  logging settings, so DebugLogManager can show what is on and never takes over
+  logging it didn't turn on. Deployed to every account in scope (as a StackSet
+  from the install stack, or as a plain stack in account-list mode).
+
+Parameters:
+  ToolsAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+    Description: The account DebugLogManager runs in.
+  AppPrincipalArn:
+    Type: String
+    Description: >-
+      The IAM role DebugLogManager runs as in the tools account (its VM role),
+      matched with ArnLike, so a wildcard is allowed.
+  ExternalId:
+    Type: String
+    MinLength: 8
+    NoEcho: true
+    Description: The install's ExternalId. DebugLogManager sends it on every assume.
+  IdentityCenterReader:
+    Type: String
+    AllowedValues: ["false", "true"]
+    Default: "false"
+    Description: >-
+      true only in the account that hosts IAM Identity Center (its delegated
+      administrator): adds the four read actions that list a user's account
+      assignments at sign-in.
+
+Conditions:
+  ReadIdentityCenter: !Equals [!Ref IdentityCenterReader, "true"]
+
+Resources:
+  ReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DebugLogManager-reader
+      Description: Read-only role for DebugLogManager (lists resources and their logging settings).
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Two statements: AWS checks sts:ExternalId only on AssumeRole, so
+          # SetSourceIdentity can't share a statement that requires it.
+          - Sid: DebugLogManagerOnly
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+              ArnLike:
+                aws:PrincipalArn: !Ref AppPrincipalArn
+              "Null":
+                sts:SourceIdentity: "false"
+          - Sid: DebugLogManagerNamesWhoAsked
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+            Action: sts:SetSourceIdentity
+            Condition:
+              ArnLike:
+                aws:PrincipalArn: !Ref AppPrincipalArn
+              StringLike:
+                sts:SourceIdentity: "?*"
+      Policies:
+        - PolicyName: read-logging-settings
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AccountName
+                Effect: Allow
+                Action: account:GetAccountInformation
+                Resource: "*"
+              - Sid: WorkerStackParameters
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:*:${AWS::AccountId}:stack/DebugLogManager-worker/*"
+              - Sid: ResourcesAndTheirLogging
+                Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeFlowLogs
+                  - ec2:DescribeRegions
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeTags
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - s3:GetBucketLogging
+                  - lambda:ListFunctions
+                  - lambda:GetFunctionConfiguration
+                  - cloudtrail:DescribeTrails
+                  - cloudtrail:GetTrailStatus
+                  - cloudtrail:GetEventSelectors
+                  - cloudtrail:LookupEvents
+                  - dynamodb:ListTables
+                  - logs:DescribeLogGroups
+                  - logs:DescribeSubscriptionFilters
+                  - logs:DescribeMetricFilters
+                  - logs:DescribeDeliverySources
+                  - cloudwatch:GetMetricStatistics
+                  - ec2:DescribeTransitGateways
+                  - elasticloadbalancing:DescribeListeners
+                  - network-firewall:ListFirewalls
+                  - network-firewall:DescribeLoggingConfiguration
+                  - logs:ListLogDeliveries
+                  - route53resolver:ListResolverQueryLogConfigs
+                  - route53resolver:ListResolverQueryLogConfigAssociations
+                  - route53:ListHostedZones
+                  - route53:ListQueryLoggingConfigs
+                  - cloudfront:ListDistributions
+                  - cloudfront:GetDistributionConfig
+                  - wafv2:ListWebACLs
+                  - wafv2:GetLoggingConfiguration
+                  - apigateway:GET
+                  - states:ListStateMachines
+                  - states:DescribeStateMachine
+                  - rds:DescribeDBInstances
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - elasticache:DescribeReplicationGroups
+                  - es:ListDomainNames
+                  - es:DescribeDomain
+                  - es:DescribeDomains
+                Resource: "*"
+
+  IdentityCenterPolicy:
+    Type: AWS::IAM::RolePolicy
+    Condition: ReadIdentityCenter
+    Properties:
+      RoleName: !Ref ReaderRole
+      PolicyName: read-identity-center-assignments
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAssignments
+            Effect: Allow
+            Action:
+              - sso:ListInstances
+              - sso:ListAccountAssignmentsForPrincipal
+              - identitystore:GetUserId
+              - identitystore:ListGroupMembershipsForMember
+            Resource: "*"
+
+Outputs:
+  ReaderRoleArn:
+    Value: !GetAtt ReaderRole.Arn

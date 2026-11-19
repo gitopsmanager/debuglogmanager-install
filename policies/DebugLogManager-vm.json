@@ -1,0 +1,135 @@
+{
+  "Role": "DebugLogManager-vm",
+  "TrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "ec2.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  },
+  "AwsManagedPolicies": [
+    "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  ],
+  "Policies": {
+    "debuglogmanager": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AssumeDebugLogManagerRoles",
+          "Effect": "Allow",
+          "Action": [
+            "sts:AssumeRole",
+            "sts:SetSourceIdentity"
+          ],
+          "Resource": [
+            "arn:aws:iam::*:role/DebugLogManager-reader",
+            "arn:aws:iam::*:role/DebugLogManager-worker",
+            "arn:aws:iam::<management-account-id>:role/DebugLogManager-identity-reader"
+          ]
+        },
+        {
+          "Sid": "StateAndAudit",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::<state-bucket>",
+            "arn:aws:s3:::<state-bucket>/*"
+          ]
+        },
+        {
+          "Sid": "ReadStackSets",
+          "Effect": "Allow",
+          "Action": [
+            "cloudformation:ListStackInstances",
+            "cloudformation:DescribeStackInstance",
+            "cloudformation:DescribeStackSet",
+            "organizations:ListDelegatedAdministrators"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Sid": "WhoChangedWhatsAllowed",
+          "Effect": "Allow",
+          "Action": "cloudtrail:LookupEvents",
+          "Resource": "*"
+        },
+        {
+          "Sid": "SignInSessionCheck",
+          "Effect": "Allow",
+          "Action": "ssm:DescribeSessions",
+          "Resource": "*"
+        },
+        {
+          "Sid": "NewestImage",
+          "Effect": "Allow",
+          "Action": "ssm:GetParameter",
+          "Resource": "*"
+        },
+        {
+          "Sid": "Metering",
+          "Effect": "Allow",
+          "Action": "aws-marketplace:MeterUsage",
+          "Resource": "*"
+        },
+        {
+          "Sid": "UpdateOwnStack",
+          "Effect": "Allow",
+          "Action": [
+            "cloudformation:DescribeStacks",
+            "cloudformation:DescribeStackEvents",
+            "cloudformation:UpdateStack"
+          ],
+          "Resource": "<this-stack-id>"
+        },
+        {
+          "Sid": "ReplaceTheVm",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:RunInstances",
+            "ec2:CreateTags",
+            "ec2:Describe*",
+            "ssm:GetParameters"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Sid": "TerminateOnlyThisStacksVm",
+          "Effect": "Allow",
+          "Action": "ec2:TerminateInstances",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:ResourceTag/aws:cloudformation:stack-id": "<this-stack-id>"
+            }
+          }
+        },
+        {
+          "Sid": "PassOwnRoleToTheNewVm",
+          "Effect": "Allow",
+          "Action": "iam:PassRole",
+          "Resource": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm",
+          "Condition": {
+            "StringEquals": {
+              "iam:PassedToService": "ec2.amazonaws.com"
+            }
+          }
+        },
+        {
+          "Sid": "ReadOwnRole",
+          "Effect": "Allow",
+          "Action": "iam:GetRole",
+          "Resource": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+        }
+      ]
+    }
+  }
+}

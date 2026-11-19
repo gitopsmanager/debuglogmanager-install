@@ -1,0 +1,62 @@
+{
+  "Role": "DebugLogManager-identity-reader",
+  "TrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "DebugLogManagerOnly",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:AssumeRole",
+        "Condition": {
+          "StringEquals": {
+            "sts:ExternalId": "<external-id>"
+          },
+          "ArnEquals": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "Null": {
+            "sts:SourceIdentity": "false"
+          }
+        }
+      },
+      {
+        "Sid": "DebugLogManagerNamesWhoAsked",
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::<tools-account-id>:root"
+        },
+        "Action": "sts:SetSourceIdentity",
+        "Condition": {
+          "ArnEquals": {
+            "aws:PrincipalArn": "arn:aws:iam::<tools-account-id>:role/DebugLogManager-vm"
+          },
+          "StringLike": {
+            "sts:SourceIdentity": "?*"
+          }
+        }
+      }
+    ]
+  },
+  "AwsManagedPolicies": [],
+  "Policies": {
+    "read-identity-center-assignments": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AccountAssignments",
+          "Effect": "Allow",
+          "Action": [
+            "sso:ListInstances",
+            "sso:ListAccountAssignmentsForPrincipal",
+            "identitystore:GetUserId",
+            "identitystore:ListGroupMembershipsForMember"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }
+  }
+}

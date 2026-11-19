@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FindTheVm",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    },
+    {
+      "Sid": "TunnelToTheVmOnly",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": "arn:aws:ec2:<region>:<tools-account-id>:instance/*",
+      "Condition": {
+        "StringEquals": { "ssm:resourceTag/Name": "debuglogmanager" },
+        "BoolIfExists": { "ssm:SessionDocumentAccessCheck": "true" }
+      }
+    },
+    {
+      "Sid": "PortForwardingNeverAShell",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": "arn:aws:ssm:<region>::document/AWS-StartPortForwardingSession"
+    },
+    {
+      "Sid": "EndOwnSessions",
+      "Effect": "Allow",
+      "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
+      "Resource": "arn:aws:ssm:*:*:session/*",
+      "Condition": {
+        "StringLike": { "ssm:resourceTag/aws:ssmmessages:session-id": "${aws:userid}" }
+      }
+    }
+  ]
+}

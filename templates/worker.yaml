@@ -1,0 +1,691 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  DebugLogManager worker role: turns logging on and off for the sources an
+  admin allows, in the regions allowed for each. Inert at install (nothing
+  allowed, trust closed). Each parameter is one permission: a source's region
+  list ("none" = not allowed), the global sources, and the two log group
+  switches. Deployed to every account in scope, in one region only (IAM is
+  global): as a StackSet from the install stack, or as a plain stack in
+  account-list mode.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Install }
+        Parameters: [ToolsAccountId, AppPrincipalArn, ExternalId]
+      - Label: { default: "Allowed regions per source (comma separated, or none)" }
+        Parameters:
+          - VpcFlowLogsRegions
+          - TgwFlowLogsRegions
+          - NetworkFirewallRegions
+          - ResolverQueryLogsRegions
+          - AlbAccessLogsRegions
+          - NlbAccessLogsRegions
+          - WafLogsRegions
+          - ApiGatewayLogsRegions
+          - ApiGatewayExecutionRegions
+          - CloudtrailDataEventsRegions
+          - S3AccessLogsRegions
+          - LambdaDebugRegions
+          - RdsLogExportsRegions
+          - EksControlPlaneRegions
+          - StepFunctionsLogsRegions
+          - ElasticacheLogsRegions
+          - OpensearchLogsRegions
+          - CloudwatchReadRegions
+      - Label: { default: Global sources and log groups }
+        Parameters: [AllowedGlobalSources, AllowRetentionChanges, AllowLogGroupDelete]
+
+Parameters:
+  ToolsAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+  AppPrincipalArn:
+    Type: String
+    Description: The role DebugLogManager runs as in the tools account (ArnLike, wildcards allowed).
+  ExternalId:
+    Type: String
+    MinLength: 8
+    NoEcho: true
+  VpcFlowLogsRegions: { Type: String, Default: none }
+  TgwFlowLogsRegions: { Type: String, Default: none }
+  NetworkFirewallRegions: { Type: String, Default: none }
+  ResolverQueryLogsRegions: { Type: String, Default: none }
+  AlbAccessLogsRegions: { Type: String, Default: none }
+  NlbAccessLogsRegions: { Type: String, Default: none }
+  WafLogsRegions: { Type: String, Default: none }
+  ApiGatewayLogsRegions: { Type: String, Default: none }
+  ApiGatewayExecutionRegions: { Type: String, Default: none }
+  CloudtrailDataEventsRegions: { Type: String, Default: none }
+  S3AccessLogsRegions: { Type: String, Default: none }
+  LambdaDebugRegions: { Type: String, Default: none }
+  RdsLogExportsRegions: { Type: String, Default: none }
+  EksControlPlaneRegions: { Type: String, Default: none }
+  StepFunctionsLogsRegions: { Type: String, Default: none }
+  ElasticacheLogsRegions: { Type: String, Default: none }
+  OpensearchLogsRegions: { Type: String, Default: none }
+  CloudwatchReadRegions:
+    Type: String
+    Default: none
+    Description: Read existing CloudWatch log groups (application logs can hold customer data).
+  AllowedGlobalSources:
+    Type: String
+    Default: none
+    Description: cloudfront-logs, route53-query-logs, waf-cloudfront-logs (comma separated), or none. All through us-east-1.
+  AllowRetentionChanges:
+    Type: String
+    AllowedValues: ["false", "true"]
+    Default: "false"
+  AllowLogGroupDelete:
+    Type: String
+    AllowedValues: ["false", "true"]
+    Default: "false"
+
+Conditions:
+  VpcOn: !Not [!Equals [!Ref VpcFlowLogsRegions, none]]
+  TgwOn: !Not [!Equals [!Ref TgwFlowLogsRegions, none]]
+  NfwOn: !Not [!Equals [!Ref NetworkFirewallRegions, none]]
+  DnsOn: !Not [!Equals [!Ref ResolverQueryLogsRegions, none]]
+  AlbOn: !Not [!Equals [!Ref AlbAccessLogsRegions, none]]
+  NlbOn: !Not [!Equals [!Ref NlbAccessLogsRegions, none]]
+  WafOn: !Not [!Equals [!Ref WafLogsRegions, none]]
+  ApigwOn: !Not [!Equals [!Ref ApiGatewayLogsRegions, none]]
+  ApigwxOn: !Not [!Equals [!Ref ApiGatewayExecutionRegions, none]]
+  CtdeOn: !Not [!Equals [!Ref CloudtrailDataEventsRegions, none]]
+  S3alOn: !Not [!Equals [!Ref S3AccessLogsRegions, none]]
+  LambdaOn: !Not [!Equals [!Ref LambdaDebugRegions, none]]
+  RdsOn: !Not [!Equals [!Ref RdsLogExportsRegions, none]]
+  EksOn: !Not [!Equals [!Ref EksControlPlaneRegions, none]]
+  SfnOn: !Not [!Equals [!Ref StepFunctionsLogsRegions, none]]
+  EcOn: !Not [!Equals [!Ref ElasticacheLogsRegions, none]]
+  OsOn: !Not [!Equals [!Ref OpensearchLogsRegions, none]]
+  CwReadOn: !Not [!Equals [!Ref CloudwatchReadRegions, none]]
+  GlobalOn: !Not [!Equals [!Ref AllowedGlobalSources, none]]
+  # A global source is allowed when splitting the list by its name changes it.
+  CfOn: !Not [!Equals [!Join ["", !Split ["cloudfront-logs", !Ref AllowedGlobalSources]], !Ref AllowedGlobalSources]]
+  R53On: !Not [!Equals [!Join ["", !Split ["route53-query-logs", !Ref AllowedGlobalSources]], !Ref AllowedGlobalSources]]
+  WafCfOn: !Not [!Equals [!Join ["", !Split ["waf-cloudfront-logs", !Ref AllowedGlobalSources]], !Ref AllowedGlobalSources]]
+  # The trust opens only when something is allowed.
+  AnyAllowed: !Or
+    - !Or [!Condition VpcOn, !Condition TgwOn, !Condition NfwOn, !Condition DnsOn, !Condition AlbOn,
+           !Condition NlbOn, !Condition WafOn, !Condition ApigwOn, !Condition ApigwxOn, !Condition CtdeOn]
+    - !Or [!Condition S3alOn, !Condition LambdaOn, !Condition RdsOn, !Condition EksOn, !Condition SfnOn,
+           !Condition EcOn, !Condition OsOn, !Condition CwReadOn, !Condition GlobalOn]
+  FlowLogsOn: !Or [!Condition VpcOn, !Condition TgwOn]
+  ApigwAny: !Or [!Condition ApigwOn, !Condition ApigwxOn]
+  # Sources that write to a bucket of DebugLogManager's own.
+  AnyBucketSource: !Or [!Condition VpcOn, !Condition TgwOn, !Condition NfwOn, !Condition DnsOn, !Condition AlbOn,
+                        !Condition NlbOn, !Condition CtdeOn, !Condition S3alOn, !Condition CfOn]
+  # Sources that write to a log group of DebugLogManager's own.
+  AnyGroupSource: !Or
+    - !Or [!Condition VpcOn, !Condition TgwOn, !Condition NfwOn, !Condition DnsOn, !Condition WafOn]
+    - !Or [!Condition ApigwOn, !Condition SfnOn, !Condition EcOn, !Condition OsOn, !Condition GlobalOn]
+  # Vended logs: the caller sets up the delivery (logs:*LogDelivery).
+  AnyVended: !Or
+    - !Or [!Condition VpcOn, !Condition TgwOn, !Condition NfwOn, !Condition DnsOn, !Condition NlbOn]
+    - !Or [!Condition WafOn, !Condition SfnOn, !Condition EcOn, !Condition GlobalOn]
+  # A log group resource policy lets the service write (DebugLogManager-log-delivery).
+  AnyResourcePolicy: !Or [!Condition NfwOn, !Condition DnsOn, !Condition WafOn, !Condition SfnOn,
+                          !Condition EcOn, !Condition OsOn, !Condition GlobalOn]
+  NetworkOn: !Or [!Condition VpcOn, !Condition TgwOn, !Condition NfwOn, !Condition DnsOn, !Condition AlbOn, !Condition NlbOn]
+  EdgeOn: !Or [!Condition WafOn, !Condition ApigwOn, !Condition ApigwxOn, !Condition GlobalOn]
+  ComputeOn: !Or [!Condition CtdeOn, !Condition S3alOn, !Condition LambdaOn, !Condition RdsOn, !Condition EksOn,
+                  !Condition SfnOn, !Condition EcOn, !Condition OsOn, !Condition CwReadOn]
+  RetentionOn: !Equals [!Ref AllowRetentionChanges, "true"]
+  DeleteOn: !Equals [!Ref AllowLogGroupDelete, "true"]
+  AnyLogGroupChange: !Or [!Condition RetentionOn, !Condition DeleteOn]
+
+Resources:
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DebugLogManager-worker
+      Description: DebugLogManager turns logging on and off with this role, within what the stack parameters allow.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Two statements when open: AWS checks sts:ExternalId only on
+          # AssumeRole, so SetSourceIdentity can't share a statement that
+          # requires it.
+          - !If
+            - AnyAllowed
+            - Sid: DebugLogManagerNamesWhoAsked
+              Effect: Allow
+              Principal:
+                AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+              Action: sts:SetSourceIdentity
+              Condition:
+                ArnLike:
+                  aws:PrincipalArn: !Ref AppPrincipalArn
+                StringLike:
+                  sts:SourceIdentity: "?*"
+            - !Ref AWS::NoValue
+          - !If
+            - AnyAllowed
+            - Sid: DebugLogManagerOnly
+              Effect: Allow
+              Principal:
+                AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+              Action: sts:AssumeRole
+              Condition:
+                StringEquals:
+                  sts:ExternalId: !Ref ExternalId
+                ArnLike:
+                  aws:PrincipalArn: !Ref AppPrincipalArn
+                "Null":
+                  sts:SourceIdentity: "false"
+            - Sid: InertNothingAllowed
+              Effect: Deny
+              Principal:
+                AWS: !Sub "arn:${AWS::Partition}:iam::${ToolsAccountId}:root"
+              Action: ["sts:AssumeRole", "sts:SetSourceIdentity"]
+      Policies:
+        - PolicyName: guards
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Control Tower's log groups are never changed, whatever else is allowed.
+              - Sid: NeverControlTower
+                Effect: Deny
+                Action: ["logs:PutRetentionPolicy", "logs:DeleteRetentionPolicy", "logs:DeleteLogGroup"]
+                Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:*aws-controltower*"
+
+  # ── Destinations: a session's own bucket or log group, and log delivery ──
+  DestinationsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: AnyAllowed
+    Properties:
+      ManagedPolicyName: DebugLogManager-worker-destinations
+      Roles: [!Ref WorkerRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - !If
+            - AnyBucketSource
+            - Sid: OwnBuckets
+              Effect: Allow
+              Action:
+                - s3:CreateBucket
+                - s3:PutBucketTagging
+                - s3:GetBucketTagging
+                - s3:PutEncryptionConfiguration
+                - s3:PutBucketPublicAccessBlock
+                - s3:PutLifecycleConfiguration
+                - s3:PutBucketOwnershipControls
+                - s3:PutBucketPolicy
+                - s3:GetBucketPolicy
+                - s3:GetBucketLocation
+                - s3:ListBucket
+                - s3:ListBucketVersions
+                - s3:DeleteBucket
+              Resource: !Sub "arn:${AWS::Partition}:s3:::dlm-*"
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref VpcFlowLogsRegions, !Ref TgwFlowLogsRegions, !Ref NetworkFirewallRegions,
+                    !Ref ResolverQueryLogsRegions, !Ref AlbAccessLogsRegions, !Ref NlbAccessLogsRegions, !Ref CloudtrailDataEventsRegions,
+                    !Ref S3AccessLogsRegions, !If [CfOn, us-east-1, none]]]]
+            - !Ref AWS::NoValue
+          # Search reads the logs; "Delete these logs now" empties the bucket.
+          - !If
+            - AnyBucketSource
+            - Sid: OwnBucketObjects
+              Effect: Allow
+              Action: ["s3:GetObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+              Resource: !Sub "arn:${AWS::Partition}:s3:::dlm-*/*"
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref VpcFlowLogsRegions, !Ref TgwFlowLogsRegions, !Ref NetworkFirewallRegions,
+                    !Ref ResolverQueryLogsRegions, !Ref AlbAccessLogsRegions, !Ref NlbAccessLogsRegions, !Ref CloudtrailDataEventsRegions,
+                    !Ref S3AccessLogsRegions, !If [CfOn, us-east-1, none]]]]
+            - !Ref AWS::NoValue
+          - !If
+            - AnyGroupSource
+            - Sid: OwnLogGroups
+              Effect: Allow
+              Action: ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagResource", "logs:TagLogGroup", "logs:DeleteLogGroup",
+                       "logs:FilterLogEvents", "logs:GetLogEvents", "logs:DescribeLogStreams"]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/debuglogmanager/*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:aws-waf-logs-dlm-*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/route53/dlm-*"
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref VpcFlowLogsRegions, !Ref TgwFlowLogsRegions, !Ref NetworkFirewallRegions,
+                    !Ref ResolverQueryLogsRegions, !Ref WafLogsRegions, !Ref ApiGatewayLogsRegions, !Ref StepFunctionsLogsRegions,
+                    !Ref ElasticacheLogsRegions, !Ref OpensearchLogsRegions, !If [GlobalOn, us-east-1, none]]]]
+            - !Ref AWS::NoValue
+          - Sid: FindLogGroups
+            Effect: Allow
+            Action: logs:DescribeLogGroups
+            Resource: "*"
+          - !If
+            - AnyVended
+            - Sid: VendedLogDelivery
+              Effect: Allow
+              Action: ["logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery", "logs:DeleteLogDelivery", "logs:ListLogDeliveries"]
+              Resource: "*"
+            - !Ref AWS::NoValue
+          # Account-wide API: DebugLogManager only ever writes its own named
+          # policy, DebugLogManager-log-delivery.
+          - !If
+            - AnyResourcePolicy
+            - Sid: LogGroupResourcePolicy
+              Effect: Allow
+              Action: ["logs:PutResourcePolicy", "logs:DescribeResourcePolicies"]
+              Resource: "*"
+            - !Ref AWS::NoValue
+
+  FlowLogsDeliveryRole:
+    Type: AWS::IAM::Role
+    Condition: FlowLogsOn
+    Properties:
+      RoleName: DebugLogManager-flowlogs-delivery
+      Description: VPC and Transit Gateway flow logs write DebugLogManager's flow logs to its log groups with this role.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: vpc-flow-logs.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { aws:SourceAccount: !Ref AWS::AccountId } }
+      Policies:
+        - PolicyName: write-own-log-groups
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/debuglogmanager/vpc-flow-logs/*"
+                  - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/debuglogmanager/tgw-flow-logs/*"
+
+  # API Gateway's account-wide CloudWatch role. DebugLogManager sets the
+  # account to it only when the account has none, and leaves it in place.
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Condition: ApigwAny
+    Properties:
+      RoleName: DebugLogManager-apigateway-cloudwatch
+      Description: API Gateway writes access and execution logs with this role (set on the account only if it had none).
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # No aws:SourceAccount condition: API Gateway doesn't send it when
+          # it writes logs, so with one nothing is logged (found in DEMO
+          # 18 Nov 2026). The role can only push to CloudWatch Logs.
+          - Effect: Allow
+            Principal: { Service: apigateway.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+  # ── Network: VPC, Transit Gateway, Network Firewall, Resolver, ALB, NLB ─
+  # Load balancer attributes and firewall logging can't be limited to what
+  # DebugLogManager created, so only the app's own check stops it touching
+  # other logging.
+  NetworkPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: NetworkOn
+    Properties:
+      ManagedPolicyName: DebugLogManager-worker-network
+      Roles: [!Ref WorkerRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - !If
+            - VpcOn
+            - Sid: VpcFlowLogs
+              Effect: Allow
+              Action: ec2:CreateFlowLogs
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc/*"
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc-flow-log/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref VpcFlowLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - TgwOn
+            - Sid: TgwFlowLogs
+              Effect: Allow
+              Action: ec2:CreateFlowLogs
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:transit-gateway/*"
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc-flow-log/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref TgwFlowLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - FlowLogsOn
+            - Sid: TagAndDeleteOwnFlowLogs
+              Effect: Allow
+              Action: ["ec2:CreateTags", "ec2:DeleteFlowLogs"]
+              Resource: !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc-flow-log/*"
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref VpcFlowLogsRegions, !Ref TgwFlowLogsRegions]]]
+                  aws:ResourceTag/dlm:managed: "true"
+            - !Ref AWS::NoValue
+          - !If
+            - FlowLogsOn
+            - Sid: TagOnCreate
+              Effect: Allow
+              Action: ec2:CreateTags
+              Resource: !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc-flow-log/*"
+              Condition:
+                StringEquals:
+                  ec2:CreateAction: CreateFlowLogs
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref VpcFlowLogsRegions, !Ref TgwFlowLogsRegions]]]
+            - !Ref AWS::NoValue
+          - !If
+            - FlowLogsOn
+            - Sid: DescribeFlowLogs
+              Effect: Allow
+              Action: ec2:DescribeFlowLogs
+              Resource: "*"
+            - !Ref AWS::NoValue
+          - !If
+            - FlowLogsOn
+            - Sid: PassFlowLogsDeliveryRole
+              Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt FlowLogsDeliveryRole.Arn
+              Condition: { StringEquals: { iam:PassedToService: vpc-flow-logs.amazonaws.com } }
+            - !Ref AWS::NoValue
+          - !If
+            - NfwOn
+            - Sid: NetworkFirewallLogging
+              Effect: Allow
+              Action: ["network-firewall:UpdateLoggingConfiguration", "network-firewall:DescribeLoggingConfiguration"]
+              Resource: !Sub "arn:${AWS::Partition}:network-firewall:*:${AWS::AccountId}:firewall/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref NetworkFirewallRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - DnsOn
+            - Sid: ResolverQueryLogs
+              Effect: Allow
+              Action:
+                - route53resolver:CreateResolverQueryLogConfig
+                - route53resolver:AssociateResolverQueryLogConfig
+                - route53resolver:DisassociateResolverQueryLogConfig
+                - route53resolver:DeleteResolverQueryLogConfig
+                - route53resolver:GetResolverQueryLogConfig
+                - route53resolver:ListResolverQueryLogConfigs
+                - route53resolver:ListResolverQueryLogConfigAssociations
+                - route53resolver:TagResource
+                - ec2:DescribeVpcs
+              Resource: "*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref ResolverQueryLogsRegions] } }
+            - !Ref AWS::NoValue
+          # The first query log config in an account makes AWS create
+          # Resolver's service-linked role.
+          - !If
+            - DnsOn
+            - Sid: ResolverServiceLinkedRole
+              Effect: Allow
+              Action: iam:CreateServiceLinkedRole
+              Resource: "*"
+              Condition: { StringEquals: { iam:AWSServiceName: route53resolver.amazonaws.com } }
+            - !Ref AWS::NoValue
+          - !If
+            - AlbOn
+            - Sid: AlbAccessLogs
+              Effect: Allow
+              Action: ["elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:DescribeLoadBalancerAttributes"]
+              Resource: !Sub "arn:${AWS::Partition}:elasticloadbalancing:*:${AWS::AccountId}:loadbalancer/app/*/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref AlbAccessLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - NlbOn
+            - Sid: NlbAccessLogs
+              Effect: Allow
+              Action: ["elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:DescribeLoadBalancerAttributes"]
+              Resource: !Sub "arn:${AWS::Partition}:elasticloadbalancing:*:${AWS::AccountId}:loadbalancer/net/*/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref NlbAccessLogsRegions] } }
+            - !Ref AWS::NoValue
+          - Sid: DescribeLoadBalancerAttributes
+            Effect: Allow
+            Action: elasticloadbalancing:DescribeLoadBalancerAttributes
+            Resource: "*"
+
+  # ── Edge and APIs: CloudFront, WAF (both), API Gateway (both), Route 53 ─
+  EdgePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EdgeOn
+    Properties:
+      ManagedPolicyName: DebugLogManager-worker-edge
+      Roles: [!Ref WorkerRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - !If
+            - CfOn
+            - Sid: CloudFrontLogDelivery
+              Effect: Allow
+              Action:
+                - logs:PutDeliverySource
+                - logs:GetDeliverySource
+                - logs:DeleteDeliverySource
+                - logs:PutDeliveryDestination
+                - logs:GetDeliveryDestination
+                - logs:DeleteDeliveryDestination
+                - logs:CreateDelivery
+                - logs:GetDelivery
+                - logs:DeleteDelivery
+                - logs:DescribeDeliveries
+                - logs:DescribeDeliverySources
+                - logs:TagResource
+                - cloudfront:AllowVendedLogDeliveryForResource
+              Resource: "*"
+              Condition: { StringEquals: { aws:RequestedRegion: us-east-1 } }
+            - !Ref AWS::NoValue
+          - !If
+            - WafOn
+            - Sid: WafRegionalLogging
+              Effect: Allow
+              Action: ["wafv2:PutLoggingConfiguration", "wafv2:DeleteLoggingConfiguration", "wafv2:GetLoggingConfiguration"]
+              Resource: !Sub "arn:${AWS::Partition}:wafv2:*:${AWS::AccountId}:regional/webacl/*/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref WafLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - WafCfOn
+            - Sid: WafCloudFrontLogging
+              Effect: Allow
+              Action: ["wafv2:PutLoggingConfiguration", "wafv2:DeleteLoggingConfiguration", "wafv2:GetLoggingConfiguration"]
+              Resource: !Sub "arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/*/*"
+            - !Ref AWS::NoValue
+          - !If
+            - ApigwAny
+            - Sid: ApiGatewayStageLogging
+              Effect: Allow
+              Action: ["apigateway:GET", "apigateway:PATCH"]
+              Resource:
+                - !Sub "arn:${AWS::Partition}:apigateway:*::/restapis/*/stages/*"
+                - !Sub "arn:${AWS::Partition}:apigateway:*::/account"
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Split [",", !Join [",", [!Ref ApiGatewayLogsRegions, !Ref ApiGatewayExecutionRegions]]]
+            - !Ref AWS::NoValue
+          - !If
+            - ApigwAny
+            - Sid: ApiGatewayAccountRole
+              Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt ApiGatewayCloudWatchRole.Arn
+              Condition: { StringEquals: { iam:PassedToService: apigateway.amazonaws.com } }
+            - !Ref AWS::NoValue
+          - !If
+            - ApigwxOn
+            - Sid: ReadExecutionLogs
+              Effect: Allow
+              Action: ["logs:FilterLogEvents", "logs:GetLogEvents"]
+              Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:API-Gateway-Execution-Logs_*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref ApiGatewayExecutionRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - R53On
+            - Sid: Route53QueryLogging
+              Effect: Allow
+              Action: ["route53:CreateQueryLoggingConfig", "route53:DeleteQueryLoggingConfig", "route53:GetQueryLoggingConfig",
+                       "route53:ListQueryLoggingConfigs"]
+              Resource: "*"
+            - !Ref AWS::NoValue
+          - !If
+            - EdgeOn
+            # Always one statement, so the policy is valid whatever is allowed.
+            - Sid: AlwaysOneStatement
+              Effect: Allow
+              Action: wafv2:ListWebACLs
+              Resource: "*"
+            - !Ref AWS::NoValue
+
+  # ── Data and compute: CloudTrail, S3, Lambda, Step Functions, RDS, EKS,
+  #    ElastiCache, OpenSearch, and the opt-in CloudWatch log reader ────────
+  ComputePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: ComputeOn
+    Properties:
+      ManagedPolicyName: DebugLogManager-worker-compute
+      Roles: [!Ref WorkerRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - !If
+            - CtdeOn
+            - Sid: OwnTrailsOnly
+              Effect: Allow
+              Action: ["cloudtrail:CreateTrail", "cloudtrail:AddTags", "cloudtrail:PutEventSelectors", "cloudtrail:GetEventSelectors",
+                       "cloudtrail:StartLogging", "cloudtrail:StopLogging", "cloudtrail:GetTrailStatus", "cloudtrail:DeleteTrail"]
+              Resource: !Sub "arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/dlm-*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref CloudtrailDataEventsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - S3alOn
+            - Sid: BucketLogging
+              Effect: Allow
+              Action: ["s3:PutBucketLogging", "s3:GetBucketLogging"]
+              Resource: !Sub "arn:${AWS::Partition}:s3:::*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref S3AccessLogsRegions] } }
+            - !Ref AWS::NoValue
+          # No iam:PassRole: a function's role can't be changed through this.
+          - !If
+            - LambdaOn
+            - Sid: LambdaLoggingConfig
+              Effect: Allow
+              Action: ["lambda:UpdateFunctionConfiguration", "lambda:GetFunctionConfiguration"]
+              Resource: !Sub "arn:${AWS::Partition}:lambda:*:${AWS::AccountId}:function:*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref LambdaDebugRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - SfnOn
+            - Sid: StepFunctionsLogging
+              Effect: Allow
+              Action: ["states:DescribeStateMachine", "states:UpdateStateMachine"]
+              Resource: !Sub "arn:${AWS::Partition}:states:*:${AWS::AccountId}:stateMachine:*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref StepFunctionsLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - RdsOn
+            - Sid: RdsLogExports
+              Effect: Allow
+              Action: ["rds:ModifyDBInstance", "rds:DescribeDBInstances", "rds:DescribeDBEngineVersions"]
+              Resource: "*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref RdsLogExportsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - EksOn
+            - Sid: EksControlPlaneLogging
+              Effect: Allow
+              Action: ["eks:DescribeCluster", "eks:UpdateClusterConfig", "eks:DescribeUpdate"]
+              Resource: !Sub "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:cluster/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref EksControlPlaneRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - EcOn
+            - Sid: ElastiCacheLogDelivery
+              Effect: Allow
+              Action: ["elasticache:ModifyReplicationGroup", "elasticache:DescribeReplicationGroups"]
+              Resource: "*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref ElasticacheLogsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - OsOn
+            - Sid: OpenSearchLogPublishing
+              Effect: Allow
+              Action: ["es:DescribeDomain", "es:UpdateDomainConfig"]
+              Resource: !Sub "arn:${AWS::Partition}:es:*:${AWS::AccountId}:domain/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref OpensearchLogsRegions] } }
+            - !Ref AWS::NoValue
+          # Search on a service's own log groups.
+          - !If
+            - LambdaOn
+            - Sid: ReadLambdaLogs
+              Effect: Allow
+              Action: ["logs:FilterLogEvents", "logs:GetLogEvents"]
+              Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/lambda/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref LambdaDebugRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - RdsOn
+            - Sid: ReadRdsLogs
+              Effect: Allow
+              Action: ["logs:FilterLogEvents", "logs:GetLogEvents"]
+              Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/rds/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref RdsLogExportsRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - EksOn
+            - Sid: ReadEksLogs
+              Effect: Allow
+              Action: ["logs:FilterLogEvents", "logs:GetLogEvents"]
+              Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/eks/*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref EksControlPlaneRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - CwReadOn
+            - Sid: ReadExistingLogGroups
+              Effect: Allow
+              Action: ["logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:FilterLogEvents", "logs:GetLogEvents"]
+              Resource: "*"
+              Condition: { StringEquals: { aws:RequestedRegion: !Split [",", !Ref CloudwatchReadRegions] } }
+            - !Ref AWS::NoValue
+          - !If
+            - ComputeOn
+            # Always one statement, so the policy is valid whatever is allowed.
+            - Sid: AlwaysOneStatement
+              Effect: Allow
+              Action: lambda:GetAccountSettings
+              Resource: "*"
+            - !Ref AWS::NoValue
+
+  # ── Log group retention and delete (install-wide switches) ────────────────
+  LogGroupChangesPolicy:
+    Type: AWS::IAM::RolePolicy
+    Condition: AnyLogGroupChange
+    Properties:
+      RoleName: !Ref WorkerRole
+      PolicyName: log-group-changes
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - !If
+            - RetentionOn
+            - Sid: Retention
+              Effect: Allow
+              Action: ["logs:PutRetentionPolicy", "logs:DeleteRetentionPolicy"]
+              Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:*"
+            - !Ref AWS::NoValue
+          - !If
+            - DeleteOn
+            - Sid: DeleteServiceLogGroups
+              Effect: Allow
+              Action: logs:DeleteLogGroup
+              Resource:
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/lambda/*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/codebuild/*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/rds/*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/eks/*"
+                - !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:API-Gateway-Execution-Logs_*"
+            - !Ref AWS::NoValue
+
+Outputs:
+  WorkerRoleArn:
+    Value: !GetAtt WorkerRole.Arn

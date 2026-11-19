@@ -1,0 +1,41 @@
+{
+  "Role": "DebugLogManager-flowlogs-delivery",
+  "TrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "vpc-flow-logs.amazonaws.com"
+        },
+        "Action": "sts:AssumeRole",
+        "Condition": {
+          "StringEquals": {
+            "aws:SourceAccount": "<account-id>"
+          }
+        }
+      }
+    ]
+  },
+  "AwsManagedPolicies": [],
+  "Policies": {
+    "write-own-log-groups": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+            "logs:DescribeLogGroups",
+            "logs:DescribeLogStreams"
+          ],
+          "Resource": [
+            "arn:aws:logs:*:<account-id>:log-group:/debuglogmanager/vpc-flow-logs/*",
+            "arn:aws:logs:*:<account-id>:log-group:/debuglogmanager/tgw-flow-logs/*"
+          ]
+        }
+      ]
+    }
+  }
+}
